@@ -18,21 +18,43 @@ import argparse
 import re
 import conllu
 import logging
+import requests
 from ufal.udpipe import Model, Pipeline, ProcessingError
 from allennlp.predictors.predictor import Predictor
 
 
 DEFAULT_UDPIPE_MODEL = "models/english-ewt-ud-2.5-191206.udpipe"
-DEFAULT_SRL_MODEL = "https://storage.googleapis.com/allennlp-public-models/bert-base-srl-2020.11.19.tar.gz"
+# DEFAULT_SRL_MODEL = "https://storage.googleapis.com/allennlp-public-models/bert-base-srl-2020.11.19.tar.gz"
+DEFAULT_SRL_MODEL = "https://storage.googleapis.com/allennlp-public-models/structured-prediction-srl-bert.2020.12.15.tar.gz"
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO, datefmt='%H:%M:%S')
 logger = logging.getLogger(__name__)
 
 
-def parse_dependencies(pipeline: Pipeline, sentence: str) -> list[conllu.TokenList]:
+def tokenise(model: Model, example: str) -> list[conllu.TokenList]:
+    """
+    Tokenisation is done using UDPipe1.
+    """
+    pipeline = Pipeline(model, "tokenize", Pipeline.NONE, Pipeline.NONE, "conllu")
     error = ProcessingError()
-    processed = pipeline.process(sentence, error)
+    processed = pipeline.process(example, error)
     return conllu.parse(processed)
+
+def parse(sentence: str) -> list[conllu.TokenList]:
+    """
+    UDPipe2 is used for the dependency parsing via the REST API.
+    """
+    url = "http://lindat.mff.cuni.cz/services/udpipe/api/process"
+    params = {
+        "model": "english-ewt-ud-2.10-220711",
+        "input": "horizontal",
+        "tagger": "",
+        "parser": "",
+        "data": sentence
+    }
+    response = requests.get(url, params)
+    data = response.json()
+    return conllu.parse(data["result"])
 
 
 def iter_token_tree(tree: conllu.TokenTree, ignore_ids: list[int]=None) -> None:
@@ -62,13 +84,16 @@ def extract_clauses_single(srl: Predictor, dep: Model, sentence: str) -> list[st
         last_arg_num = -1
         last_arg_indices = []
 
+        logging.info(verb["description"])
+
         # Wh Handling
         for i, (word, tag) in enumerate(zip(labels["words"], verb["tags"])):
             if "R-ARG" in tag:
                 words[i] = " ".join(words[j] for j in last_arg_indices)
-                split_indices.append(verb["tags"].index("B-V"))
-            if re.search(r"ARG\d+", tag):
-                num = int(re.search(r"\d+", tag).group())
+                split_indices.append(i)
+            m = re.search(r"ARG(.*)", tag)
+            if m:
+                num = m.group(1)
                 if num == last_arg_num:
                     last_arg_indices.append(i)
                 else:
@@ -78,13 +103,16 @@ def extract_clauses_single(srl: Predictor, dep: Model, sentence: str) -> list[st
         # Conjunction Handling
         for i, (word, tag) in enumerate(zip(labels["words"], verb["tags"])):
             if word == "and":
-                if "ARG" in tag:
+                next_tag = verb["tags"][i + 1]
+                if "ARG" not in tag and "ARG" in next_tag:
+                    words[i] = ""
                     split_indices.append(i)
-                elif verb["tags"][i + 1] == "B-V":
+                elif next_tag == "B-V":
                     words[i] = " ".join(words[j] for j in last_arg_indices)
-                    split_indices.append(i + 1)
-            if re.search(r"ARG\d+", tag):
-                num = int(re.search(r"\d+", tag).group())
+                    split_indices.append(i)
+            m = re.search(r"ARG(.*)", tag)
+            if m:
+                num = m.group(1)
                 if num == last_arg_num:
                     last_arg_indices.append(i)
                 else:
@@ -92,8 +120,7 @@ def extract_clauses_single(srl: Predictor, dep: Model, sentence: str) -> list[st
                     last_arg_indices = [i]
 
     # Insertion Handling
-    pipeline = Pipeline(udpipe_model, "horizontal", Pipeline.DEFAULT, Pipeline.DEFAULT, "conllu")
-    token_list = parse_dependencies(pipeline, " ".join(labels["words"]))[0]
+    token_list = parse(" ".join(labels["words"]))[0]
     tree = token_list.to_tree()
     # Make sure the udpipe's tokenisation matches the srl's one
     assert len(token_list) == len(words)
@@ -102,22 +129,29 @@ def extract_clauses_single(srl: Predictor, dep: Model, sentence: str) -> list[st
     subj = []
     for node in iter_token_tree(tree):
         token = node.token
-        # print(token["deprel"], token["form"], token["id"], sep="\t")
-        if "subj" in token["deprel"]:
-            subj = [words[token["id"] - 1] for token in flatten_tree(node)]
-        
-        if (token["id"] - 1) in split_indices:
+        if token["deprel"] == "conj" and any(t.token["form"] == "and" and (t.token["id"] - 1) in split_indices for t in node.children):
+            logging.info("Conjunction split on %s[%s]", token["form"], token["deprel"])
             clauses.append([words[token["id"] - 1] for token in flatten_tree(node)])
+            split_indices.append(token["id"] - 1)
+        elif any((t.token["id"] - 1) in split_indices for t in node.children):
+            logging.info("Wh split on %s[%s]", token["form"], token["deprel"])
+            clauses.append([words[token["id"] - 1] for token in flatten_tree(node)])
+            split_indices.append(token["id"] - 1)
         elif token["deprel"] in ["appos", "advcl", "acl", "acl:relcl"]:
+            logging.info("Insertion split on %s[%s]", token["form"], token["deprel"])
             clauses.append(subj + [words[token["id"] - 1] for token in flatten_tree(node)])
             split_indices.append(token["id"] - 1)
+        
+        if "subj" in token["deprel"]:
+            subj = [words[token["id"] - 1] for token in flatten_tree(node)]
+            logger.info("Subject '%s'", " ".join(subj))
 
     clauses.append([words[token["id"] - 1] for token in flatten_tree(tree, [i + 1 for i in split_indices])])
         
-    def clause_filter(clause: list[str]) -> str:
-        return " ".join(word for word in clause if word != ",")
+    def clause_filter(word: str) -> bool:
+        return word != "," and word.strip()
 
-    return [clause_filter(clause) for clause in clauses]
+    return [" ".join(filter(clause_filter, clause)) for clause in clauses if clause]
 
 
 def extract_clauses(srl: Predictor, dep: Model, example: str) -> list[str]:
@@ -125,8 +159,7 @@ def extract_clauses(srl: Predictor, dep: Model, example: str) -> list[str]:
     Extracts clauses from the given example. The example may consist of multiple sentences. Each sentence is processed
     separately and the clauses are merged together.
     """
-    pipeline = Pipeline(udpipe_model, "tokenize", Pipeline.NONE, Pipeline.NONE, "conllu")
-    token_lists = parse_dependencies(pipeline, example)
+    token_lists = tokenise(dep, example)
 
     clauses = []
     for token_list in token_lists:
