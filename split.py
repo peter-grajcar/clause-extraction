@@ -24,8 +24,8 @@ from allennlp.predictors.predictor import Predictor
 
 
 DEFAULT_UDPIPE_MODEL = "models/english-ewt-ud-2.5-191206.udpipe"
-# DEFAULT_SRL_MODEL = "https://storage.googleapis.com/allennlp-public-models/bert-base-srl-2020.11.19.tar.gz"
 DEFAULT_SRL_MODEL = "https://storage.googleapis.com/allennlp-public-models/structured-prediction-srl-bert.2020.12.15.tar.gz"
+UDPIPE_2_API_URL_BASE = "http://lindat.mff.cuni.cz/services/udpipe/api"
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO, datefmt='%H:%M:%S')
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ def parse(sentence: str) -> list[conllu.TokenList]:
     """
     UDPipe2 is used for the dependency parsing via the REST API.
     """
-    url = "http://lindat.mff.cuni.cz/services/udpipe/api/process"
+    url = f"{UDPIPE_2_API_URL_BASE}/process"
     params = {
         "model": "english-ewt-ud-2.10-220711",
         "input": "horizontal",
