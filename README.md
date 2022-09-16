@@ -1,6 +1,6 @@
 # Clause Extraction
 
-An implementation of algorithm described in paper
+An implementation of algorithm for clause extraction described in paper
 [_L. Zhang, H. Zhu, S. Brahma, and Y. Li, “Small but Mighty: New Benchmarks for
 Split and Rephrase,” 2020._](https://arxiv.org/abs/2009.08560)
 
