@@ -22,6 +22,32 @@ optional arguments:
   --output OUTPUT       Output file.
 ```
 
+## Example Outputs
+
+Original:
+
+_Twilight performs black metal music which when part of a musical fusion is
+called death metal._
+
+Extracted clauses:
+
+- _Twilight performs black metal music ._
+- _black metal music when part of a musical fusion is called death metal_
+
+___
+
+Original:
+
+_William Anders who is originally from Hong Kong worked for NASA and became a
+crew member for Apollo 8 along with Buzz Aldrin and Frank Borman._
+
+Extracted clauses:
+
+- _William Anders is originally from Hong Kong_
+- _William Anders worked for NASA ._
+- _William Anders who is originally from Hong Kong became a crew member for
+  Apollo 8 along with Buzz Aldrin and Frank Borman_
+
 ## The Algorithm
 
 The description of the algorithm from the paper (Appendix A):
