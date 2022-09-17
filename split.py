@@ -21,11 +21,13 @@ import logging
 import requests
 from ufal.udpipe import Model, Pipeline, ProcessingError
 from allennlp.predictors.predictor import Predictor
+from itertools import cycle
 
 
 DEFAULT_UDPIPE_MODEL = "models/english-ewt-ud-2.5-191206.udpipe"
 DEFAULT_SRL_MODEL = "https://storage.googleapis.com/allennlp-public-models/structured-prediction-srl-bert.2020.12.15.tar.gz"
-UDPIPE_2_API_URL_BASE = "http://lindat.mff.cuni.cz/services/udpipe/api"
+UDPIPE_2_API_URL_BASE = "https://lindat.mff.cuni.cz/services/udpipe/api"
+
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO, datefmt='%H:%M:%S')
 logger = logging.getLogger(__name__)
@@ -57,18 +59,20 @@ def parse(sentence: str) -> list[conllu.TokenList]:
     return conllu.parse(data["result"])
 
 
-def iter_token_tree(tree: conllu.TokenTree, ignore_ids: list[int]=None) -> None:
+def iter_token_tree(tree: conllu.TokenTree, ignore_ids: list[int]=None, ignore_deprel: list[str]=None) -> None:
     nodes = [tree]
     while nodes:
         tree = nodes.pop()
         if ignore_ids and tree.token["id"] in ignore_ids:
             continue
+        if ignore_deprel and tree.token["deprel"] in ignore_deprel:
+            continue
         nodes.extend(reversed(tree.children))
         yield tree
 
 
-def flatten_tree(tree: conllu.TokenTree, ignore_ids: list[int]=None) -> conllu.TokenList:
-    tokens = [node.token for node in iter_token_tree(tree, ignore_ids)]
+def flatten_tree(tree: conllu.TokenTree, ignore_ids: list[int]=None, ignore_deprel: list[str]=None) -> conllu.TokenList:
+    tokens = [node.token for node in iter_token_tree(tree, ignore_ids, ignore_deprel)]
     tokens = sorted(tokens, key=lambda t: t['id'])
     return conllu.TokenList(tokens, tree.metadata)
 
@@ -85,11 +89,11 @@ def extract_clauses_single(srl: Predictor, dep: Model, sentence: str) -> list[st
         last_arg_indices = []
 
         logging.info(verb["description"])
-
+        
         # Wh Handling
         for i, (word, tag) in enumerate(zip(labels["words"], verb["tags"])):
             if "R-ARG" in tag:
-                words[i] = " ".join(words[j] for j in last_arg_indices)
+                words[i] = " ".join(labels["words"][j] for j in last_arg_indices)
                 split_indices.append(i)
             m = re.search(r"ARG(.*)", tag)
             if m:
@@ -108,7 +112,7 @@ def extract_clauses_single(srl: Predictor, dep: Model, sentence: str) -> list[st
                     words[i] = ""
                     split_indices.append(i)
                 elif next_tag == "B-V":
-                    words[i] = " ".join(words[j] for j in last_arg_indices)
+                    words[i] = " ".join(labels["words"][j] for j in last_arg_indices)
                     split_indices.append(i)
             m = re.search(r"ARG(.*)", tag)
             if m:
@@ -130,28 +134,37 @@ def extract_clauses_single(srl: Predictor, dep: Model, sentence: str) -> list[st
     for node in iter_token_tree(tree):
         token = node.token
         if token["deprel"] == "conj" and any(t.token["form"] == "and" and (t.token["id"] - 1) in split_indices for t in node.children):
-            logging.info("Conjunction split on %s[%s]", token["form"], token["deprel"])
-            clauses.append([words[token["id"] - 1] for token in flatten_tree(node)])
+            clause = [words[token["id"] - 1] for token in flatten_tree(node)]
+            clauses.append((token["id"], clause))
             split_indices.append(token["id"] - 1)
+
+            logging.info("Conjunction split on %s[%s]: %s", token["form"], token["deprel"], " ".join(clause))
         elif any((t.token["id"] - 1) in split_indices for t in node.children):
-            logging.info("Wh split on %s[%s]", token["form"], token["deprel"])
-            clauses.append([words[token["id"] - 1] for token in flatten_tree(node)])
+            clause = [words[token["id"] - 1] for token in flatten_tree(node)]
+            clauses.append((token["id"], clause))
             split_indices.append(token["id"] - 1)
+
+            logging.info("Wh split on %s[%s]: %s", token["form"], token["deprel"], " ".join(clause))
         elif token["deprel"] in ["appos", "advcl", "acl", "acl:relcl"]:
-            logging.info("Insertion split on %s[%s]", token["form"], token["deprel"])
-            clauses.append(subj + [words[token["id"] - 1] for token in flatten_tree(node)])
+            clause = subj + [words[token["id"] - 1] for token in flatten_tree(node)]
+            clauses.append((token["id"], clause))
             split_indices.append(token["id"] - 1)
+
+            logging.info("Insertion split on %s[%s]: %s", token["form"], token["deprel"], " ".join(clause))
         
         if "subj" in token["deprel"]:
-            subj = [words[token["id"] - 1] for token in flatten_tree(node)]
+            subj = [words[token["id"] - 1] for token in flatten_tree(node, ignore_deprel=["acl:relcl"])]
             logger.info("Subject '%s'", " ".join(subj))
 
-    clauses.append([words[token["id"] - 1] for token in flatten_tree(tree, [i + 1 for i in split_indices])])
+    clause = [words[token["id"] - 1] for token in flatten_tree(tree, [i + 1 for i in split_indices])]
+    clauses.append((tree.token["id"], clause))
         
     def clause_filter(word: str) -> bool:
         return word != "," and word.strip()
 
-    return [" ".join(filter(clause_filter, clause)) for clause in clauses if clause]
+    clauses = sorted(clauses, key=lambda t: t[0])
+    clauses = [" ".join(filter(clause_filter, clause)) for (id, clause) in clauses]
+    return [clause for clause in clauses if clause]
 
 
 def extract_clauses(srl: Predictor, dep: Model, example: str) -> list[str]:
@@ -200,10 +213,13 @@ if __name__ == "__main__":
     with open(args.input) as f:
         examples = [line.rstrip() for line in f]
 
+    colours = [31, 32, 33, 34]
+
     with open(args.output, "w") as f:
         for example in examples:
             logger.info("Original: %s", example)
             clauses = extract_clauses(srl_predictor, udpipe_model, example)
-            logger.info("Split:    %s", " \033[31m|\033[0m ".join(clauses))
+            logger.info("Splits: %s", 
+                        " ".join(f"\033[{colour}m{clause}\033[0m" for clause, colour in zip(clauses, cycle(colours))))
             print(args.sep.join(clauses), file=f)
 
