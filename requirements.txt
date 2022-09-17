@@ -1,5 +1,8 @@
 ufal.udpipe==1.2.0.3
 allennlp==2.10.0
 allennlp-models==2.10.0
-logzero
+drawSvg==1.8.3
+numpy==1.23.3 
+scikit-learn==1.1.2
+snowballstemmer==2.2.0
 requests
