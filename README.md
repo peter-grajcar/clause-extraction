@@ -24,7 +24,7 @@ optional arguments:
 
 ## Example Outputs
 
-Original:
+Original sentence:
 
 _Twilight performs black metal music which when part of a musical fusion is
 called death metal._
@@ -36,7 +36,7 @@ Extracted clauses:
 
 ___
 
-Original:
+Original sentence:
 
 _William Anders who is originally from Hong Kong worked for NASA and became a
 crew member for Apollo 8 along with Buzz Aldrin and Frank Borman._
