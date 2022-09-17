@@ -7,13 +7,15 @@ Split and Rephrase,” 2020._](https://arxiv.org/abs/2009.08560)
 ## Usage
 
 ```txt
-split.py [-h] [--udpipe_model_path UDPIPE_MODEL_PATH] [--srl_model_path SRL_MODEL_PATH] [--sep SEP] --input INPUT --output OUTPUT
+./split.py [-h] [--udpipe_model UDPIPE_MODEL] [--udpipe_server UDPIPE_SERVER] [--srl_model SRL_MODEL] [--sep SEP] --input INPUT --output OUTPUT
 
 optional arguments:
   -h, --help            show this help message and exit
-  --udpipe_model_path UDPIPE_MODEL_PATH
-                        Path to the UDPipe model.
-  --srl_model_path SRL_MODEL_PATH
+  --udpipe_model UDPIPE_MODEL
+                        Path to the UDPipe 1 model (used for tokenisation).
+  --udpipe_server UDPIPE_SERVER
+                        URL of the UDPipe 2 server (used for parsing).
+  --srl_model SRL_MODEL
                         Path to the AllenNLP semantic role labeling model.
   --sep SEP             Clause separator used in the output file.
   --input INPUT         Input file.

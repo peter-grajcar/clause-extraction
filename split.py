@@ -26,7 +26,7 @@ from itertools import cycle
 
 DEFAULT_UDPIPE_MODEL = "models/english-ewt-ud-2.5-191206.udpipe"
 DEFAULT_SRL_MODEL = "https://storage.googleapis.com/allennlp-public-models/structured-prediction-srl-bert.2020.12.15.tar.gz"
-UDPIPE_2_API_URL_BASE = "https://lindat.mff.cuni.cz/services/udpipe/api"
+DEFAULT_UDPIPE_2_API_URL = "https://lindat.mff.cuni.cz/services/udpipe/api"
 
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO, datefmt='%H:%M:%S')
@@ -42,11 +42,11 @@ def tokenise(model: Model, example: str) -> list[conllu.TokenList]:
     processed = pipeline.process(example, error)
     return conllu.parse(processed)
 
-def parse(sentence: str) -> list[conllu.TokenList]:
+def parse(sentence: str, api_url:str=DEFAULT_UDPIPE_2_API_URL) -> list[conllu.TokenList]:
     """
     UDPipe2 is used for the dependency parsing via the REST API.
     """
-    url = f"{UDPIPE_2_API_URL_BASE}/process"
+    url = f"{api_url}/process"
     params = {
         "model": "english-ewt-ud-2.10-220711",
         "input": "horizontal",
@@ -77,7 +77,7 @@ def flatten_tree(tree: conllu.TokenTree, ignore_ids: list[int]=None, ignore_depr
     return conllu.TokenList(tokens, tree.metadata)
 
 
-def extract_clauses_single(srl: Predictor, dep: Model, sentence: str) -> list[str]:
+def extract_clauses_single(srl: Predictor, dep: Model, sentence: str, udpipe_server: str=DEFAULT_UDPIPE_2_API_URL) -> list[str]:
     """
     Extracts sentences from a single sentence.
     """
@@ -124,7 +124,7 @@ def extract_clauses_single(srl: Predictor, dep: Model, sentence: str) -> list[st
                     last_arg_indices = [i]
 
     # Insertion Handling
-    token_list = parse(" ".join(labels["words"]))[0]
+    token_list = parse(" ".join(labels["words"]), api_url=udpipe_server)[0]
     tree = token_list.to_tree()
     # Make sure the udpipe's tokenisation matches the srl's one
     assert len(token_list) == len(words)
@@ -167,7 +167,7 @@ def extract_clauses_single(srl: Predictor, dep: Model, sentence: str) -> list[st
     return [clause for clause in clauses if clause]
 
 
-def extract_clauses(srl: Predictor, dep: Model, example: str) -> list[str]:
+def extract_clauses(srl: Predictor, dep: Model, example: str, udpipe_server: str=DEFAULT_UDPIPE_2_API_URL) -> list[str]:
     """
     Extracts clauses from the given example. The example may consist of multiple sentences. Each sentence is processed
     separately and the clauses are merged together.
@@ -184,11 +184,15 @@ def extract_clauses(srl: Predictor, dep: Model, example: str) -> list[str]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--udpipe_model_path", 
+    parser.add_argument("--udpipe_model", 
                         type=str, 
                         default=DEFAULT_UDPIPE_MODEL, 
-                        help="Path to the UDPipe model.")
-    parser.add_argument("--srl_model_path", 
+                        help="Path to the UDPipe 1 model (used for tokenisation).")
+    parser.add_argument("--udpipe_server", 
+                        type=str, 
+                        default=DEFAULT_UDPIPE_2_API_URL, 
+                        help="URL of the UDPipe 2 server (used for parsing).")
+    parser.add_argument("--srl_model", 
                         type=str, 
                         default=DEFAULT_SRL_MODEL, 
                         help="Path to the AllenNLP semantic role labeling model.")
@@ -206,9 +210,8 @@ if __name__ == "__main__":
                         help="Output file.")
     args = parser.parse_args()
 
-    udpipe_model = Model.load(args.udpipe_model_path)
-    
-    srl_predictor = Predictor.from_path(args.srl_model_path)
+    udpipe_model = Model.load(args.udpipe_model)
+    srl_predictor = Predictor.from_path(args.srl_model)
 
     with open(args.input) as f:
         examples = [line.rstrip() for line in f]
@@ -218,7 +221,7 @@ if __name__ == "__main__":
     with open(args.output, "w") as f:
         for example in examples:
             logger.info("Original: %s", example)
-            clauses = extract_clauses(srl_predictor, udpipe_model, example)
+            clauses = extract_clauses(srl_predictor, udpipe_model, example, udpipe_server=args.udpipe_server)
             logger.info("Splits: %s", 
                         " ".join(f"\033[{colour}m{clause}\033[0m" for clause, colour in zip(clauses, cycle(colours))))
             print(args.sep.join(clauses), file=f)
