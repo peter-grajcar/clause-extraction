@@ -134,36 +134,48 @@ def extract_clauses_single(srl: Predictor, dep: Model, sentence: str, udpipe_ser
     for node in iter_token_tree(tree):
         token = node.token
         if token["deprel"] == "conj" and any(t.token["form"] == "and" and (t.token["id"] - 1) in split_indices for t in node.children):
-            clause = [words[token["id"] - 1] for token in flatten_tree(node)]
+            clause = [words[t["id"] - 1] for t in flatten_tree(node)]
             clauses.append((token["id"], clause))
             split_indices.append(token["id"] - 1)
 
             logging.info("Conjunction split on %s[%s]: %s", token["form"], token["deprel"], " ".join(clause))
         elif any((t.token["id"] - 1) in split_indices for t in node.children):
-            clause = [words[token["id"] - 1] for token in flatten_tree(node)]
+            clause = [words[t["id"] - 1] for t in flatten_tree(node)]
             clauses.append((token["id"], clause))
             split_indices.append(token["id"] - 1)
 
             logging.info("Wh split on %s[%s]: %s", token["form"], token["deprel"], " ".join(clause))
-        elif token["deprel"] in ["appos", "advcl", "acl", "acl:relcl"]:
-            clause = subj + [words[token["id"] - 1] for token in flatten_tree(node)]
+        elif token["deprel"] == "appos" and any(t["upostag"] != "PROPN" and t["upostag"] != "PUNCT" for t in flatten_tree(node)):
+            clause = subj + [words[t["id"] - 1] for t in flatten_tree(node)]
+            clauses.append((token["id"], clause))
+            split_indices.append(token["id"] - 1)
+
+            logging.info("Insertion split on %s[%s]: %s", token["form"], token["deprel"], " ".join(clause))
+        elif token["deprel"] in ["advcl", "acl", "acl:relcl"]:
+            clause = subj + [words[t["id"] - 1] for t in flatten_tree(node)]
             clauses.append((token["id"], clause))
             split_indices.append(token["id"] - 1)
 
             logging.info("Insertion split on %s[%s]: %s", token["form"], token["deprel"], " ".join(clause))
         
         if "subj" in token["deprel"]:
-            subj = [words[token["id"] - 1] for token in flatten_tree(node, ignore_deprel=["acl:relcl"])]
+            subj = [words[t["id"] - 1] for t in flatten_tree(node, ignore_deprel=["acl:relcl"])]
             logger.info("Subject '%s'", " ".join(subj))
 
-    clause = [words[token["id"] - 1] for token in flatten_tree(tree, [i + 1 for i in split_indices])]
+    clause = [words[t["id"] - 1] for t in flatten_tree(tree, [i + 1 for i in split_indices])]
     clauses.append((tree.token["id"], clause))
         
-    def clause_filter(word: str) -> bool:
-        return word != "," and word.strip()
+    class ClauseFilter:
+        def __init__(self):
+            self.prev = None
+
+        def __call__(self, word: str) -> bool:
+            ret = (self.prev != "," or word != ",") and word.strip()
+            self.prev = word
+            return ret
 
     clauses = sorted(clauses, key=lambda t: t[0])
-    clauses = [" ".join(filter(clause_filter, clause)) for (id, clause) in clauses]
+    clauses = [" ".join(filter(ClauseFilter(), clause)) for (id, clause) in clauses]
     return [clause for clause in clauses if clause]
 
 
