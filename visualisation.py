@@ -45,8 +45,8 @@ def draw_alignment(in_clauses: list[str], ref_clauses: list[str], alignment: lis
     for (i, j), colour in zip(enumerate(alignment), cycle(COLOURS)):
         if j == -1:
             continue
-        x1 = 20 + sum(len(clause) for clause in in_clauses[:i]) * 5 + len(in_clauses[i]) * 5 / 2
-        x2 = 20 + sum(len(clause) for clause in ref_clauses[:j]) * 5 + len(ref_clauses[j]) * 5 / 2
+        x1 = 10 + sum(len(clause) for clause in in_clauses[:i]) * 5.25 + len(in_clauses[i]) * 5.25 / 2
+        x2 = 10 + sum(len(clause) for clause in ref_clauses[:j]) * 5.25 + len(ref_clauses[j]) * 5.25 / 2
         d.append(draw.Path(f"M{x1},25 {x2},115", marker_end=arrow_head, stroke=colour))
 
     return d

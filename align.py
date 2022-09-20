@@ -22,7 +22,7 @@ import logging
 from sklearn.metrics.pairwise import cosine_similarity
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import Generator, Tuple, Callable
+from typing import Generator, Tuple, Callable, Iterable
 import snowballstemmer
 
 
@@ -80,6 +80,18 @@ class Index:
 WeightFunction = Callable[[int, int], float]
 
 
+def build_index(clauses: Iterable[str]) -> Index:
+    index = Index()
+
+    for i, clause in enumerate(clauses):
+        for word in stemmer.stemWords(clause.lower().split()):
+            if word in STOP_WORDS:
+                continue
+            index.add(word, i)
+
+    return index
+
+
 def compute_weight_and_index(tokens: list[str], index: Index, 
                              weight_function: WeightFunction) -> Generator[Tuple[float, int], None, None]:
     term_freq = defaultdict(int)
@@ -107,19 +119,15 @@ def construct_matrix(clauses: list[str], index: Index, weight_function: WeightFu
     return matrix
 
 
-def align_clauses(in_clauses: list[str], ref_clauses: list[str]) -> list[int]:
-    index = Index()
-    for i, clause in enumerate(ref_clauses):
-        for word in stemmer.stemWords(clause.lower().split()):
-            if word in STOP_WORDS:
-                continue
-            index.add(word, i)
-
+def align_clauses(in_clauses: list[str], ref_clauses: list[str], index: Index) -> list[int]:
     def tfidf(tf, df): 
         if tf == 0 or df == 0:
             return 0
         else:
             return (1 + np.log10(tf)) * (np.log10(len(ref_clauses) / df))
+
+    def tf(tf, df):
+        return tf
 
     in_matrix = construct_matrix(in_clauses, index, tfidf)
     ref_matrix = construct_matrix(ref_clauses, index, tfidf)
@@ -155,6 +163,11 @@ if __name__ == "__main__":
         svg_path = (export_path / "svg")
         svg_path.mkdir(exist_ok=True)
 
+    with open(args.ref_clauses) as ref_file:
+        index = build_index(
+            clause for ref_line in ref_file for clause in ref_line.rstrip("\n").split(args.sep)
+        )
+            
     with open(args.in_clauses) as in_file, open(args.ref_clauses) as ref_file, open(args.output, "w") as out_file:
         for i, (in_line, ref_line) in enumerate(zip(in_file, ref_file)):
             in_clauses = in_line.rstrip("\n").split(args.sep)
@@ -163,7 +176,7 @@ if __name__ == "__main__":
             logging.info("Input clauses: %s", in_clauses)
             logging.info("Reference clauses: %s", ref_clauses)
 
-            alignment = align_clauses(in_clauses, ref_clauses)
+            alignment = align_clauses(in_clauses, ref_clauses, index)
 
             logging.info("Alignment: %s", alignment)
 
@@ -181,7 +194,7 @@ if __name__ == "__main__":
             if args.in_sentences:
                 in_file = open(args.in_sentences)
             if args.ref_sentences:
-                ref_file = open(args.in_sentences)
+                ref_file = open(args.ref_sentences)
             for i in range(total):
                 if args.in_sentences:
                     print(f"    Original sentences: <i>", in_file.readline(), "</i>", file=index)
